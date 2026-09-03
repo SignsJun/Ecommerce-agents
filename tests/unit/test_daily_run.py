@@ -1,0 +1,48 @@
+from datetime import UTC, datetime
+
+from app.cli import main
+from app.config.settings import Settings
+from domain.business.inventory import days_of_cover
+from domain.enums import IssueType
+from services.daily_run import run_daily
+from tests.fixtures.make_olist import AS_OF, write_mini_olist
+
+
+def test_pipeline_detects_four_issue_types(tmp_path):
+    data_dir = write_mini_olist(tmp_path / "olist")
+    settings = Settings(as_of_date=AS_OF, store_seller_id="seller_demo", timezone="UTC")
+    result = run_daily(data_dir, settings=settings, now=datetime(2018, 3, 16, tzinfo=UTC))
+    assert result.snapshot.skus
+    assert result.snapshot.data_quality.missing_sources
+    sku = result.snapshot.skus["sku_stockout_risk"]
+    assert sku.inventory_available > 0
+    assert sku.revenue_7d > 0
+    assert days_of_cover(sku.inventory_available, sku.units_sold_7d) < sku.lead_time_days + 7
+    cover_excess = days_of_cover(
+        result.snapshot.skus["sku_excess_inventory"].inventory_available,
+        result.snapshot.skus["sku_excess_inventory"].units_sold_7d,
+    )
+    assert cover_excess > 60
+    assert any(
+        i.issue_type == IssueType.PROFIT_EROSION and i.entity_id == "sku_profit_erosion" for i in result.issues
+    )
+    assert any(
+        i.issue_type == IssueType.AD_INEFFICIENCY and i.entity_id == "sku_ad_inefficiency" for i in result.issues
+    )
+    assert any(
+        i.issue_type == IssueType.STOCKOUT_RISK and i.entity_id == "sku_stockout_risk" for i in result.issues
+    )
+    assert any(
+        i.issue_type == IssueType.EXCESS_INVENTORY and i.entity_id == "sku_excess_inventory" for i in result.issues
+    )
+    for issue in result.issues:
+        assert issue.evidence_ids
+        assert issue.based_on_snapshot_id == result.snapshot.snapshot_id
+
+
+def test_cli_run_daily(tmp_path, capsys):
+    data_dir = write_mini_olist(tmp_path / "olist")
+    code = main(["run-daily", "--data-dir", str(data_dir)])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "issues=" in out
