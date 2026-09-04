@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 
-from agents.diagnosis.agent import diagnose
+from agents.diagnosis.agent import diagnose, format_diagnosis_trace
 from agents.llm.client import LLMUnavailable
 from agents.llm.factory import llm_from_settings
 from agents.llm.scripts import scripted_llm
@@ -77,17 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         f"tools={report.tool_calls_used}\tirrelevant={outcome.irrelevant_tool_requests}\t"
         f"coverage={report.active_investigation_coverage}\tmodel={report.model_version}"
     )
-    for cause in report.root_causes:
-        print(
-            f"cause\t{cause.cause_type}\tconf={cause.confidence}\t"
-            f"evidence={len(cause.supporting_evidence_ids)}"
-        )
-    for item in report.screened_causes:
-        print(f"screen\t{item.cause_type}\t{item.status.value}\tscore={item.materiality_score}")
-    print(
-        f"unresolved\t{','.join(report.unresolved_causes) or '-'}\t"
-        f"uncertainties={len(report.uncertainties)}\tkey_evidence={len(report.key_evidence_ids)}"
-    )
+    print(format_diagnosis_trace(outcome))
     return 0
 
 

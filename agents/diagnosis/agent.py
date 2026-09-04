@@ -17,11 +17,13 @@ from agents.diagnosis.preflight import run_preflight
 from agents.diagnosis.schema import (
     DiagnosisReportDraft,
     DiagnosisStep,
+    LLMCauseAssessment,
+    to_assessments,
     to_hypotheses,
     to_root_causes,
 )
 from agents.llm.client import LLMClient, LLMUnavailable
-from domain.diagnosis.cause import CauseInvestigation, CauseStatus
+from domain.diagnosis.cause import CauseAssessment, CauseInvestigation, CauseStatus
 from domain.diagnosis.hypothesis import RootCause, ToolCallRecord
 from domain.diagnosis.report import DiagnosisReport
 from domain.diagnosis.state import DiagnosisState
@@ -29,6 +31,32 @@ from domain.issue.models import Issue
 from tools.diagnosis.base import TOOL_VERSION, ToolContext, ToolResult
 from tools.diagnosis.handlers import project_horizon_dates
 from tools.diagnosis.registry import invoke
+
+def format_diagnosis_trace(outcome: DiagnoseOutcome) -> str:
+    lines = ["Preflight Cause Status"]
+    for c in outcome.preflight_causes:
+        lines.append(f"  {c.cause_type}\t{c.status.value}")
+    lines.append("→ ReAct 后 Cause Status")
+    for c in outcome.post_react_causes:
+        lines.append(f"  {c.cause_type}\t{c.status.value}")
+    lines.append("→ CauseAssessment")
+    for a in outcome.report.cause_assessments:
+        lines.append(f"  {a.cause_type}\t{a.conclusion}\tconf={a.confidence}\tevidence={len(a.evidence_ids)}")
+    if not outcome.report.cause_assessments:
+        lines.append("  -")
+    lines.append("→ Root Causes")
+    for c in outcome.report.root_causes:
+        lines.append(f"  {c.cause_type}\tconf={c.confidence}\tevidence={len(c.supporting_evidence_ids)}")
+    if not outcome.report.root_causes:
+        lines.append("  -")
+    lines.append("→ Unresolved Active Causes")
+    lines.append(f"  {','.join(outcome.report.unresolved_causes) or '-'}")
+    lines.append("→ Final Status")
+    lines.append(
+        f"  {outcome.report.status}\tcoverage={outcome.report.active_investigation_coverage}\t"
+        f"tools={outcome.report.tool_calls_used}"
+    )
+    return "\n".join(lines)
 
 AGENT_VERSION = "diagnosis-v2"
 MAX_TOOL_CALLS = DEFAULT_BUDGET.max_total_tool_calls
@@ -45,6 +73,8 @@ class DiagnoseOutcome:
     prompt_version: str
     preflight_tools: tuple[str, ...] = ()
     recent_results: list[ToolResult] = field(default_factory=list)
+    preflight_causes: list[CauseInvestigation] = field(default_factory=list)
+    post_react_causes: list[CauseInvestigation] = field(default_factory=list)
 
 
 def _coerce_args(raw: dict[str, str | int | float | bool | None]) -> dict[str, str | int | float | bool | None | date]:
@@ -117,6 +147,9 @@ def _get_cause(state: DiagnosisState, name: str | None) -> CauseInvestigation | 
 
 
 def _put_cause(state: DiagnosisState, cause: CauseInvestigation) -> DiagnosisState:
+    existing = next((c for c in state.causes if c.cause_type == cause.cause_type), None)
+    if cause.status == CauseStatus.ACTIVE or cause.was_activated or (existing is not None and existing.was_activated):
+        cause = cause.model_copy(update={"was_activated": True})
     found = False
     causes = []
     for item in state.causes:
@@ -171,26 +204,24 @@ def _apply_hypotheses(state: DiagnosisState, step: DiagnosisStep) -> DiagnosisSt
     return next_state
 
 
+_RESOLVED = {CauseStatus.INVESTIGATED_SUPPORTED, CauseStatus.INVESTIGATED_REJECTED}
+
+
+def _activated(state: DiagnosisState) -> list[CauseInvestigation]:
+    return [c for c in state.causes if c.was_activated]
+
+
+def _unresolved_activated(state: DiagnosisState) -> list[CauseInvestigation]:
+    return [c for c in _activated(state) if c.status not in _RESOLVED]
+
+
 def _coverage(state: DiagnosisState) -> tuple[list[str], float]:
-    unresolved = [
-        c.cause_type
-        for c in state.causes
-        if c.status in {CauseStatus.ACTIVE, CauseStatus.BLOCKED_BY_DATA}
-    ]
-    touched = [
-        c
-        for c in state.causes
-        if c.status
-        in {
-            CauseStatus.ACTIVE,
-            CauseStatus.INVESTIGATED_SUPPORTED,
-            CauseStatus.INVESTIGATED_REJECTED,
-            CauseStatus.BLOCKED_BY_DATA,
-        }
-    ]
-    resolved = [c for c in touched if c.status != CauseStatus.ACTIVE]
-    cov = 1.0 if not touched else len(resolved) / len(touched)
-    return unresolved, cov
+    activated = _activated(state)
+    unresolved = [c.cause_type for c in _unresolved_activated(state)]
+    if not activated:
+        return unresolved, 1.0
+    resolved = [c for c in activated if c.status in _RESOLVED]
+    return unresolved, len(resolved) / len(activated)
 
 
 def _ground_from_causes(state: DiagnosisState) -> list[RootCause]:
@@ -218,12 +249,108 @@ def _ground_from_causes(state: DiagnosisState) -> list[RootCause]:
 def _legal_status(grounded: list[RootCause], state: DiagnosisState) -> str:
     if not grounded:
         return "insufficient_evidence"
-    if _unresolved_active(state) or any(c.status == CauseStatus.BLOCKED_BY_DATA for c in state.causes):
+    leftover = _unresolved_activated(state)
+    if leftover:
         return "partial"
     return "confirmed"
 
 
-def _validate_report(state: DiagnosisState, draft: DiagnosisReportDraft, model_version: str, now) -> DiagnosisReport:
+def resolve_cause_states(
+    state: DiagnosisState,
+    grounded: list[RootCause],
+    draft_assessments: list[LLMCauseAssessment] | list[CauseAssessment],
+) -> tuple[DiagnosisState, list[CauseAssessment]]:
+    known = set(state.evidence_ids)
+    by_draft = {a.cause_type: a for a in to_assessments(list(draft_assessments))}
+    grounded_map = {c.cause_type: c for c in grounded}
+    assessments: list[CauseAssessment] = []
+    next_state = state
+    for cur in state.causes:
+        draft_a = by_draft.get(cur.cause_type)
+        if cur.cause_type in grounded_map:
+            rc = grounded_map[cur.cause_type]
+            assessment = CauseAssessment(
+                cause_type=cur.cause_type,
+                conclusion="supported",
+                confidence=rc.confidence,
+                evidence_ids=list(rc.supporting_evidence_ids),
+            )
+        elif draft_a is not None:
+            eids = [eid for eid in draft_a.evidence_ids if eid in known]
+            conclusion = draft_a.conclusion
+            if conclusion == "supported" and not eids and cur.status != CauseStatus.INVESTIGATED_SUPPORTED:
+                conclusion = "uncertain"
+            assessment = CauseAssessment(
+                cause_type=cur.cause_type,
+                conclusion=conclusion,
+                confidence=draft_a.confidence,
+                evidence_ids=eids,
+            )
+        elif cur.status == CauseStatus.INVESTIGATED_REJECTED:
+            assessment = CauseAssessment(
+                cause_type=cur.cause_type,
+                conclusion="rejected",
+                confidence=cur.confidence,
+                evidence_ids=list(cur.evidence_ids),
+            )
+        elif cur.status == CauseStatus.INVESTIGATED_SUPPORTED:
+            assessment = CauseAssessment(
+                cause_type=cur.cause_type,
+                conclusion="supported",
+                confidence=cur.confidence,
+                evidence_ids=list(cur.evidence_ids),
+            )
+        elif cur.status == CauseStatus.ACTIVE:
+            assessment = CauseAssessment(
+                cause_type=cur.cause_type,
+                conclusion="uncertain",
+                confidence=0.0,
+                evidence_ids=list(cur.evidence_ids),
+            )
+        else:
+            continue
+        assessments.append(assessment)
+        latest = _get_cause(next_state, cur.cause_type) or cur
+        if assessment.conclusion == "supported":
+            next_state = _put_cause(
+                next_state,
+                latest.model_copy(
+                    update={
+                        "status": CauseStatus.INVESTIGATED_SUPPORTED,
+                        "confidence": assessment.confidence or latest.confidence,
+                        "evidence_ids": list(dict.fromkeys([*latest.evidence_ids, *assessment.evidence_ids])),
+                        "resolution_reason": latest.resolution_reason or "supported_by_evidence",
+                    }
+                ),
+            )
+        elif assessment.conclusion == "rejected":
+            next_state = _put_cause(
+                next_state,
+                latest.model_copy(
+                    update={
+                        "status": CauseStatus.INVESTIGATED_REJECTED,
+                        "confidence": assessment.confidence,
+                        "evidence_ids": list(dict.fromkeys([*latest.evidence_ids, *assessment.evidence_ids])),
+                        "resolution_reason": latest.resolution_reason or "rejected",
+                    }
+                ),
+            )
+        elif assessment.conclusion == "uncertain" and latest.status == CauseStatus.ACTIVE:
+            next_state = _put_cause(
+                next_state,
+                latest.model_copy(
+                    update={
+                        "status": CauseStatus.BLOCKED_BY_DATA,
+                        "resolution_reason": latest.resolution_reason or "insufficient_data",
+                    }
+                ),
+            )
+    return next_state, assessments
+
+
+def _validate_report(
+    state: DiagnosisState, draft: DiagnosisReportDraft, model_version: str, now
+) -> tuple[DiagnosisReport, DiagnosisState]:
     known = set(state.evidence_ids)
     grounded: list[RootCause] = []
     for cause in to_root_causes(draft.root_causes):
@@ -241,6 +368,7 @@ def _validate_report(state: DiagnosisState, draft: DiagnosisReportDraft, model_v
         )
     if not grounded:
         grounded = _ground_from_causes(state)
+    state, assessments = resolve_cause_states(state, grounded, draft.cause_assessments)
     status = _legal_status(grounded, state)
     overall = max((c.confidence for c in grounded), default=0.0)
     if draft.overall_confidence and grounded:
@@ -251,41 +379,50 @@ def _validate_report(state: DiagnosisState, draft: DiagnosisReportDraft, model_v
             if eid not in key_ids:
                 key_ids.append(eid)
     unresolved, cov = _coverage(state)
-    return DiagnosisReport(
-        diagnosis_id=state.diagnosis_id,
-        issue_id=state.issue.issue_id,
-        status=status,
-        root_causes=grounded,
-        overall_confidence=overall,
-        key_evidence_ids=key_ids,
-        uncertainties=list(draft.uncertainties) or list(state.unresolved_questions),
-        generated_at=now,
-        agent_version=AGENT_VERSION,
-        model_version=model_version,
-        screened_causes=list(state.causes),
-        unresolved_causes=unresolved,
-        active_investigation_coverage=cov,
-        tool_calls_used=len(state.tool_history),
+    return (
+        DiagnosisReport(
+            diagnosis_id=state.diagnosis_id,
+            issue_id=state.issue.issue_id,
+            status=status,
+            root_causes=grounded,
+            overall_confidence=overall,
+            key_evidence_ids=key_ids,
+            uncertainties=list(draft.uncertainties) or list(state.unresolved_questions),
+            generated_at=now,
+            agent_version=AGENT_VERSION,
+            model_version=model_version,
+            screened_causes=list(state.causes),
+            cause_assessments=assessments,
+            unresolved_causes=unresolved,
+            active_investigation_coverage=cov,
+            tool_calls_used=len(state.tool_history),
+        ),
+        state,
     )
 
 
-def _fallback_report(state: DiagnosisState, model_version: str, reason: str, now) -> DiagnosisReport:
+def _fallback_report(state: DiagnosisState, model_version: str, reason: str, now) -> tuple[DiagnosisReport, DiagnosisState]:
+    state, assessments = resolve_cause_states(state, [], [])
     unresolved, cov = _coverage(state)
-    return DiagnosisReport(
-        diagnosis_id=state.diagnosis_id,
-        issue_id=state.issue.issue_id,
-        status="insufficient_evidence",
-        root_causes=[],
-        overall_confidence=0.0,
-        key_evidence_ids=[],
-        uncertainties=[reason, *state.unresolved_questions],
-        generated_at=now,
-        agent_version=AGENT_VERSION,
-        model_version=model_version,
-        screened_causes=list(state.causes),
-        unresolved_causes=unresolved,
-        active_investigation_coverage=cov,
-        tool_calls_used=len(state.tool_history),
+    return (
+        DiagnosisReport(
+            diagnosis_id=state.diagnosis_id,
+            issue_id=state.issue.issue_id,
+            status="insufficient_evidence",
+            root_causes=[],
+            overall_confidence=0.0,
+            key_evidence_ids=[],
+            uncertainties=[reason, *state.unresolved_questions],
+            generated_at=now,
+            agent_version=AGENT_VERSION,
+            model_version=model_version,
+            screened_causes=list(state.causes),
+            cause_assessments=assessments,
+            unresolved_causes=unresolved,
+            active_investigation_coverage=cov,
+            tool_calls_used=len(state.tool_history),
+        ),
+        state,
     )
 
 
@@ -307,6 +444,7 @@ def diagnose(
         diagnosis_status="in_progress",
     )
     state, recent = run_preflight(state, ctx)
+    preflight_causes = list(state.causes)
     system = load_system_prompt()
     irrelevant = 0
     unnecessary = 0
@@ -439,11 +577,12 @@ def diagnose(
         if stagnant >= STAGNANT_LIMIT:
             break
 
+    post_react_causes = list(state.causes)
     try:
         draft = llm.complete(system, build_report_context(state, ctx), DiagnosisReportDraft)
-        report = _validate_report(state, draft, llm.model_name, ctx.now)
+        report, state = _validate_report(state, draft, llm.model_name, ctx.now)
     except LLMUnavailable:
-        report = _fallback_report(state, llm.model_name, "llm_unavailable", ctx.now)
+        report, state = _fallback_report(state, llm.model_name, "llm_unavailable", ctx.now)
     state = state.model_copy(update={"root_causes": report.root_causes, "diagnosis_status": report.status})
     return DiagnoseOutcome(
         report=report,
@@ -453,4 +592,6 @@ def diagnose(
         prompt_version=PROMPT_VERSION,
         preflight_tools=PREFLIGHT_TOOLS.get(issue.issue_type, ()),
         recent_results=recent,
+        preflight_causes=preflight_causes,
+        post_react_causes=post_react_causes,
     )

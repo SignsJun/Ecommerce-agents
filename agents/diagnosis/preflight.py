@@ -27,6 +27,7 @@ def _item(cause_type: str, status: CauseStatus, score: float | None, reason: str
         materiality_score=score,
         activation_reason=reason if status == CauseStatus.ACTIVE else None,
         resolution_reason=None if status == CauseStatus.ACTIVE else reason,
+        was_activated=status == CauseStatus.ACTIVE,
     )
 
 

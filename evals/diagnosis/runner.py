@@ -1,17 +1,15 @@
 import json
 from pathlib import Path
 
-from agents.diagnosis.agent import diagnose
+from agents.diagnosis.agent import diagnose, format_diagnosis_trace
 from agents.llm.scripts import scripted_llm
 from domain.enums import IssueType
 from evals.diagnosis.metrics import (
-    correct_escalation,
-    evidence_grounding,
-    hallucination_rate,
-    irrelevant_tool_rate,
-    root_cause_accuracy,
-    tool_efficiency,
-    unnecessary_investigation_rate,
+    evidence_accuracy,
+    finalization_accuracy,
+    root_cause_f1,
+    root_cause_precision,
+    root_cause_recall,
 )
 from services.daily_run import run_daily
 from tools.diagnosis.investigate import context_from_run
@@ -26,18 +24,18 @@ def load_scenarios() -> list[dict]:
     return rows
 
 
-def _score(spec: dict, outcome, expect_insufficient: bool) -> dict:
+def _score(spec: dict, outcome, expected_status: str) -> dict:
     hidden = spec["hidden_root_causes"]
     return {
         "scenario_id": spec["scenario_id"],
         "status": outcome.report.status,
-        "root_cause_accuracy": root_cause_accuracy(outcome.report, hidden),
-        "evidence_grounding": evidence_grounding(outcome.report, outcome.state),
-        "tool_efficiency": tool_efficiency(outcome.state),
-        "irrelevant_tool_rate": irrelevant_tool_rate(outcome),
-        "hallucination_rate": hallucination_rate(outcome.report, outcome.state),
-        "correct_escalation": correct_escalation(outcome.report, expect_insufficient),
-        "unnecessary_investigation_rate": unnecessary_investigation_rate(outcome),
+        "root_cause_precision": root_cause_precision(outcome.report, hidden),
+        "root_cause_recall": root_cause_recall(outcome.report, hidden),
+        "root_cause_f1": root_cause_f1(outcome.report, hidden),
+        "evidence_accuracy": evidence_accuracy(outcome.report, outcome.state),
+        "tool_calls": outcome.report.tool_calls_used,
+        "finalization_accuracy": finalization_accuracy(outcome.report, expected_status),
+        "trace": format_diagnosis_trace(outcome),
     }
 
 
@@ -49,7 +47,7 @@ def run_fake_benchmark(data_dir: Path, now, settings) -> list[dict]:
         issue = next(i for i in daily.issues if i.entity_id == spec["issue_entity_id"])
         llm = scripted_llm(IssueType(spec["issue_type"]))
         outcome = diagnose(issue, ctx, llm)
-        scores.append(_score(spec, outcome, False))
+        scores.append(_score(spec, outcome, "confirmed"))
     return scores
 
 
@@ -61,4 +59,4 @@ def run_missing_metrics_escalation(data_dir: Path, now, settings) -> dict:
     spec = next(s for s in load_scenarios() if s["issue_type"] == "profit_erosion")
     issue = next(i for i in daily.issues if i.entity_id == spec["issue_entity_id"])
     outcome = diagnose(issue, ctx, scripted_llm(IssueType.PROFIT_EROSION))
-    return _score(spec, outcome, True)
+    return _score(spec, outcome, "insufficient_evidence")

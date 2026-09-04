@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from domain.diagnosis.cause import CauseAssessment
 from domain.diagnosis.hypothesis import Hypothesis, RootCause
 
 DiagnosisAction = Literal[
@@ -54,9 +55,17 @@ class LLMRootCause(LLMModel):
     supporting_evidence_ids: list[str] = []
 
 
+class LLMCauseAssessment(LLMModel):
+    cause_type: str
+    conclusion: Literal["supported", "rejected", "uncertain"]
+    confidence: float = 0.0
+    evidence_ids: list[str] = []
+
+
 class DiagnosisReportDraft(LLMModel):
     status: Literal["confirmed", "partial", "insufficient_evidence"]
     root_causes: list[LLMRootCause] = []
+    cause_assessments: list[LLMCauseAssessment] = []
     uncertainties: list[str] = []
     overall_confidence: float = 0.0
 
@@ -73,6 +82,18 @@ def to_hypotheses(items: list[LLMHypothesis]) -> list[Hypothesis]:
             status=h.status,
         )
         for h in items
+    ]
+
+
+def to_assessments(items: list[LLMCauseAssessment]) -> list[CauseAssessment]:
+    return [
+        CauseAssessment(
+            cause_type=a.cause_type,
+            conclusion=a.conclusion,
+            confidence=max(0.0, min(1.0, a.confidence)),
+            evidence_ids=list(a.evidence_ids),
+        )
+        for a in items
     ]
 
 

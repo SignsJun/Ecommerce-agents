@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 
 from domain.base import FrozenModel
-from domain.diagnosis.cause import CauseInvestigation
+from domain.diagnosis.cause import CauseAssessment, CauseInvestigation
 from domain.diagnosis.hypothesis import RootCause
 
 
@@ -18,6 +18,7 @@ class DiagnosisReport(FrozenModel):
     agent_version: str
     model_version: str
     screened_causes: list[CauseInvestigation] = []
+    cause_assessments: list[CauseAssessment] = []
     unresolved_causes: list[str] = []
     active_investigation_coverage: float = 0.0
     tool_calls_used: int = 0

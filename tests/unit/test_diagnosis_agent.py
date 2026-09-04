@@ -64,7 +64,7 @@ def test_fake_llm_four_issue_types(tmp_path):
         assert outcome.report.agent_version == "diagnosis-v2"
         assert outcome.prompt_version == "diagnosis/system_v2"
         assert outcome.report.root_causes
-        assert outcome.report.status in {"confirmed", "partial"}
+        assert outcome.report.status == "confirmed"
         assert evidence_grounding(outcome.report, outcome.state) == 1.0
         assert outcome.report.overall_confidence > 0.4
 
@@ -223,8 +223,8 @@ def test_partial_blocked_keeps_confidence(tmp_path):
     assert outcome.report.root_causes
     refund = next(c for c in outcome.report.root_causes if c.cause_type == "refunds")
     assert refund.confidence >= 0.9
-    if outcome.report.status == "partial":
-        assert outcome.report.overall_confidence >= 0.9
+    assert outcome.report.status == "partial"
+    assert outcome.report.overall_confidence >= 0.9
 
 
 def test_activate_cause_reopens(tmp_path):

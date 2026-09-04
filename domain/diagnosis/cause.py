@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Literal
 
 from domain.base import FrozenModel
 
@@ -23,3 +24,11 @@ class CauseInvestigation(FrozenModel):
     investigation_tool_calls: int = 0
     activation_reason: str | None = None
     resolution_reason: str | None = None
+    was_activated: bool = False
+
+
+class CauseAssessment(FrozenModel):
+    cause_type: str
+    conclusion: Literal["supported", "rejected", "uncertain"]
+    confidence: float = 0.0
+    evidence_ids: list[str] = []
