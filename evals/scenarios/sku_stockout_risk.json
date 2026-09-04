@@ -1,0 +1,1 @@
+{"scenario_id": "sku_stockout_risk", "issue_entity_id": "sku_stockout_risk", "issue_type": "stockout_risk", "hidden_root_causes": ["inventory"]}

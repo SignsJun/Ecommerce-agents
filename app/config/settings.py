@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     as_of_date: date | None = None
     store_id: str = "STORE_001"
     store_name: str = "WorkBuddy Demo Store"
+    llm_base_url: str = "https://api.deepseek.com"
+    llm_api_key: str | None = None
+    llm_model: str = "deepseek-chat"
 
 
 def default_policy() -> BusinessPolicyConfig:

@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from agents.llm.client import LLMUnavailable
 from app.cli import main
 from app.config.settings import Settings
 from domain.business.inventory import days_of_cover
@@ -55,3 +56,24 @@ def test_cli_investigate(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "investigate" in out
     assert "get_sku_summary" in out
+
+
+def test_cli_diagnose_fake(tmp_path, capsys):
+    data_dir = write_mini_olist(tmp_path / "olist")
+    code = main(["diagnose", "--data-dir", str(data_dir), "--fake-llm"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "diagnose" in out
+    assert "status=" in out
+
+
+def test_cli_diagnose_missing_key(tmp_path, capsys, monkeypatch):
+    data_dir = write_mini_olist(tmp_path / "olist")
+
+    def boom(settings):
+        raise LLMUnavailable("missing ECOM_LLM_API_KEY")
+
+    monkeypatch.setattr("app.cli.llm_from_settings", boom)
+    code = main(["diagnose", "--data-dir", str(data_dir)])
+    assert code == 1
+    assert "missing ECOM_LLM_API_KEY" in capsys.readouterr().out
