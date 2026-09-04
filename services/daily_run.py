@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -23,10 +23,24 @@ class DailyRunResult:
         snapshot: BusinessStateSnapshot,
         metrics: list[MetricState],
         issues: list[Issue],
+        business_repo: InMemoryBusinessRepository,
+        snapshot_repo: InMemorySnapshotRepository,
+        issue_repo: InMemoryIssueRepository,
+        policy: BusinessPolicyConfig,
+        as_of: date,
+        tz: ZoneInfo,
+        now: datetime,
     ) -> None:
         self.snapshot = snapshot
         self.metrics = metrics
         self.issues = issues
+        self.business_repo = business_repo
+        self.snapshot_repo = snapshot_repo
+        self.issue_repo = issue_repo
+        self.policy = policy
+        self.as_of = as_of
+        self.tz = tz
+        self.now = now
 
 
 def run_daily(
@@ -68,6 +82,7 @@ def run_daily(
     )
     business_repo.save_sku_daily(ops.sku_daily)
     business_repo.save_campaign_daily(ops.campaign_daily)
+    business_repo.save_reviews(ops.reviews)
     version = snapshot_repo.current_version() + 1
     snapshot = build_snapshot(
         ops,
@@ -90,4 +105,15 @@ def run_daily(
         issue_repo.save_evidence(item)
     for issue in issues:
         issue_repo.save_issue(issue)
-    return DailyRunResult(snapshot=snapshot, metrics=metrics, issues=issues)
+    return DailyRunResult(
+        snapshot=snapshot,
+        metrics=metrics,
+        issues=issues,
+        business_repo=business_repo,
+        snapshot_repo=snapshot_repo,
+        issue_repo=issue_repo,
+        policy=policy,
+        as_of=as_of,
+        tz=tz,
+        now=now,
+    )

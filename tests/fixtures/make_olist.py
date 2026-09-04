@@ -11,7 +11,7 @@ SKUS = {
     "sku_ad_inefficiency": ("watches_gifts", "80.00"),
     "sku_stockout_risk": ("health_beauty", "50.00"),
     "sku_excess_inventory": ("bed_bath_table", "40.00"),
-    "sku_healthy": ("sports_leisure", "60.00"),
+    "sku_healthy": ("cool_stuff", "60.00"),
 }
 
 

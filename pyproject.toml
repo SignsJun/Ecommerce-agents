@@ -16,7 +16,7 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [tool.setuptools.packages.find]
-include = ["app*", "domain*", "repositories*", "services*"]
+include = ["app*", "domain*", "repositories*", "services*", "tools*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

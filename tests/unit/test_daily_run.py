@@ -46,3 +46,12 @@ def test_cli_run_daily(tmp_path, capsys):
     assert code == 0
     out = capsys.readouterr().out
     assert "issues=" in out
+
+
+def test_cli_investigate(tmp_path, capsys):
+    data_dir = write_mini_olist(tmp_path / "olist")
+    code = main(["investigate", "--data-dir", str(data_dir)])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "investigate" in out
+    assert "get_sku_summary" in out
