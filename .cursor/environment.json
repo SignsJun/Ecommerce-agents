@@ -1,0 +1,4 @@
+{
+  "name": "ecommerce-decision-agent",
+  "install": "python3 -m pip install -e \".[dev]\" && python3 -c \"from pathlib import Path; from tests.fixtures.make_olist import write_mini_olist; write_mini_olist(Path('data/raw/olist'))\""
+}
