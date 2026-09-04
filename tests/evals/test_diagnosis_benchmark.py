@@ -17,6 +17,7 @@ def test_fake_benchmark_grounding(tmp_path):
         assert row["hallucination_rate"] == 0.0
         assert row["irrelevant_tool_rate"] == 0.0
         assert row["correct_escalation"] == 1.0
+        assert row["unnecessary_investigation_rate"] == 0.0
 
 
 def test_missing_metrics_escalation(tmp_path):

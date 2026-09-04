@@ -1,8 +1,16 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from domain.diagnosis.hypothesis import Hypothesis, RootCause
+
+DiagnosisAction = Literal[
+    "call_tool",
+    "activate_cause",
+    "reject_cause",
+    "request_stop",
+    "escalate",
+]
 
 
 class LLMModel(BaseModel):
@@ -22,10 +30,20 @@ class LLMHypothesis(LLMModel):
 class DiagnosisStep(LLMModel):
     hypotheses: list[LLMHypothesis] = []
     unresolved_questions: list[str] = []
-    action: Literal["call_tool", "stop"]
+    action: DiagnosisAction
+    target_cause: str | None = None
     tool_name: str | None = None
     tool_args: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    reason: str | None = None
+    evidence_ids: list[str] = []
     stop_reason: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _alias_stop(cls, data):
+        if isinstance(data, dict) and data.get("action") == "stop":
+            data = {**data, "action": "request_stop"}
+        return data
 
 
 class LLMRootCause(LLMModel):

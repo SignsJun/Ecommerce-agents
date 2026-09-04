@@ -74,15 +74,20 @@ def main(argv: list[str] | None = None) -> int:
     report = outcome.report
     print(
         f"diagnose\tissue={issue.issue_id}\tstatus={report.status}\t"
-        f"tools={len(outcome.state.tool_history)}\tirrelevant={outcome.irrelevant_tool_requests}\t"
-        f"model={report.model_version}"
+        f"tools={report.tool_calls_used}\tirrelevant={outcome.irrelevant_tool_requests}\t"
+        f"coverage={report.active_investigation_coverage}\tmodel={report.model_version}"
     )
     for cause in report.root_causes:
         print(
             f"cause\t{cause.cause_type}\tconf={cause.confidence}\t"
             f"evidence={len(cause.supporting_evidence_ids)}"
         )
-    print(f"uncertainties\t{len(report.uncertainties)}\tkey_evidence={len(report.key_evidence_ids)}")
+    for item in report.screened_causes:
+        print(f"screen\t{item.cause_type}\t{item.status.value}\tscore={item.materiality_score}")
+    print(
+        f"unresolved\t{','.join(report.unresolved_causes) or '-'}\t"
+        f"uncertainties={len(report.uncertainties)}\tkey_evidence={len(report.key_evidence_ids)}"
+    )
     return 0
 
 

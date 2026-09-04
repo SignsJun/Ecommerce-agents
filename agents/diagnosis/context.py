@@ -4,10 +4,10 @@ from pathlib import Path
 from agents.diagnosis.causal_graph import CAUSE_TYPES, allowed_tools
 from domain.diagnosis.state import DiagnosisState
 from tools.diagnosis.base import ToolContext, ToolResult
-from tools.diagnosis.handlers import project_horizon_dates
+from tools.diagnosis.handlers import project_baseline_30d, project_horizon_dates
 
-PROMPT_VERSION = "diagnosis/system_v1"
-_PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "diagnosis" / "system_v1.md"
+PROMPT_VERSION = "diagnosis/system_v2"
+_PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "diagnosis" / "system_v2.md"
 _MAX_CHARS = 6000
 
 
@@ -40,6 +40,9 @@ def _payload_brief(payload: dict) -> dict:
             "inventory_available": sku.get("inventory_available"),
             "units_sold_7d": sku.get("units_sold_7d"),
             "refund_rate_7d": sku.get("refund_rate_7d"),
+            "roas_7d": sku.get("roas_7d"),
+            "roas_prev_7d": sku.get("roas_prev_7d"),
+            "ad_spend_7d": sku.get("ad_spend_7d"),
         }
     if kind == "metric_trend":
         series = payload.get("series") or []
@@ -164,10 +167,18 @@ def build_user_context(
             "refund_rate_7d": s.refund_rate_7d,
             "revenue_7d": str(s.revenue_7d),
             "profit_7d": str(s.profit_7d),
+            "ad_spend_7d": str(s.ad_spend_7d),
+            "roas_7d": s.roas_7d,
+            "roas_prev_7d": s.roas_prev_7d,
+            "roas_30d": s.roas_30d,
+            "paid_traffic_7d": s.paid_traffic_7d,
+            "ad_conversions_7d": s.ad_conversions_7d,
         }
     a0, a1, b0, b1 = project_horizon_dates(ctx.as_of)
+    c0, c1 = project_baseline_30d(ctx.as_of)
     campaigns = ctx.business_repo.list_campaigns_for_sku(issue.entity_id)
     evidence = ctx.issue_repo.list_evidence(state.evidence_ids)
+    active = [c.cause_type for c in state.causes if c.status.value == "active"]
     body = {
         "issue": {
             "issue_id": issue.issue_id,
@@ -184,11 +195,16 @@ def build_user_context(
             "period_a_end": a1.isoformat(),
             "period_b_start": b0.isoformat(),
             "period_b_end": b1.isoformat(),
+            "baseline_30d_start": c0.isoformat(),
+            "baseline_30d_end": c1.isoformat(),
             "metric_window": "7d",
         },
         "campaign_ids": campaigns[:8],
         "allowed_tools": list(allowed_tools(issue.issue_type)),
         "allowed_cause_types": list(CAUSE_TYPES.get(issue.issue_type, ())),
+        "causes": [c.model_dump(mode="json") for c in state.causes],
+        "active_causes": active,
+        "gate_feedback": state.gate_feedback,
         "hypotheses": [h.model_dump(mode="json") for h in state.hypotheses],
         "unresolved_questions": state.unresolved_questions,
         "evidence": [
@@ -227,7 +243,7 @@ def build_report_context(state: DiagnosisState, ctx: ToolContext) -> str:
             }
             for e in evidence[:12]
         ],
-        "successful_tools": [t.tool_name for t in state.tool_history if t.success],
-        "failed_tools": [t.tool_name for t in state.tool_history if not t.success],
+        "causes": [c.model_dump(mode="json") for c in state.causes],
+        "unresolved_active": [c.cause_type for c in state.causes if c.status.value == "active"],
     }
     return _dumps(body)

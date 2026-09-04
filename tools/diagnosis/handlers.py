@@ -634,5 +634,9 @@ def get_promotion_history(ctx: ToolContext, sku_id: str) -> ToolResult:
 
 def project_horizon_dates(as_of: date) -> tuple[date, date, date, date]:
     a_start, a_end = window(as_of, 7)
-    b_start, b_end = window(as_of, 30, offset_end=7)
+    b_start, b_end = window(as_of, 7, offset_end=7)
     return a_start, a_end, b_start, b_end
+
+
+def project_baseline_30d(as_of: date) -> tuple[date, date]:
+    return window(as_of, 30)

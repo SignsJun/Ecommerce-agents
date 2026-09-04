@@ -41,6 +41,14 @@ def hallucination_rate(report: DiagnosisReport, state: DiagnosisState) -> float:
     return bad / len(cited)
 
 
+def unnecessary_investigation_rate(outcome: DiagnoseOutcome) -> float:
+    pre = set(outcome.preflight_tools)
+    agent_calls = [t for t in outcome.state.tool_history if t.tool_name not in pre]
+    if not agent_calls:
+        return 0.0
+    return outcome.unnecessary_tool_requests / len(agent_calls)
+
+
 def correct_escalation(report: DiagnosisReport, expect_insufficient: bool) -> float:
     got = report.status == "insufficient_evidence"
     return 1.0 if got == expect_insufficient else 0.0

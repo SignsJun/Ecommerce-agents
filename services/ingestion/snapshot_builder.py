@@ -28,6 +28,7 @@ def build_snapshot(
             lead_time_days=profile.lead_time_days,
             rows=ops.sku_daily,
             as_of=as_of,
+            campaign_rows=ops.campaign_daily,
         )
     campaigns = {}
     campaign_ids = {row.campaign_id: row.sku_id for row in ops.campaign_daily}

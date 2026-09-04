@@ -24,6 +24,12 @@ class SKUState(FrozenModel):
     conversion_rate_7d: float | None = None
     refund_rate_7d: float
     avg_rating_30d: float | None = None
+    ad_spend_7d: Decimal = Decimal("0")
+    roas_7d: float | None = None
+    roas_prev_7d: float | None = None
+    roas_30d: float | None = None
+    paid_traffic_7d: int = 0
+    ad_conversions_7d: int = 0
 
 
 class SKUDailyMetric(FrozenModel):

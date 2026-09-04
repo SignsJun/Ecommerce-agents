@@ -28,17 +28,24 @@ NEIGHBORHOOD: dict[IssueType, tuple[str, ...]] = {
 }
 
 CAUSE_TYPES: dict[IssueType, tuple[str, ...]] = {
-    IssueType.PROFIT_EROSION: ("ad_efficiency", "refunds", "cogs", "price", "conversion"),
+    IssueType.PROFIT_EROSION: ("revenue", "cogs", "ad_efficiency", "refunds", "price", "conversion"),
     IssueType.AD_INEFFICIENCY: ("ad_efficiency", "campaign_mix"),
     IssueType.STOCKOUT_RISK: ("inventory",),
     IssueType.EXCESS_INVENTORY: ("excess_inventory", "demand_decline"),
 }
 
-COVERAGE_TOOLS: dict[IssueType, frozenset[str]] = {
-    IssueType.PROFIT_EROSION: frozenset({"decompose_profit"}),
-    IssueType.AD_INEFFICIENCY: frozenset({"get_campaign_breakdown", "get_campaign_trend"}),
-    IssueType.STOCKOUT_RISK: frozenset({"get_inventory_projection"}),
-    IssueType.EXCESS_INVENTORY: frozenset({"get_inventory_projection"}),
+SCREEN_FAMILIES: dict[IssueType, tuple[str, ...]] = {
+    IssueType.PROFIT_EROSION: ("revenue", "cogs", "ad_efficiency", "refunds"),
+    IssueType.AD_INEFFICIENCY: ("ad_efficiency", "campaign_mix"),
+    IssueType.STOCKOUT_RISK: ("inventory",),
+    IssueType.EXCESS_INVENTORY: ("excess_inventory", "demand_decline"),
+}
+
+PREFLIGHT_TOOLS: dict[IssueType, tuple[str, ...]] = {
+    IssueType.PROFIT_EROSION: ("get_issue_context", "decompose_profit"),
+    IssueType.AD_INEFFICIENCY: ("get_issue_context", "get_campaign_breakdown"),
+    IssueType.STOCKOUT_RISK: ("get_issue_context", "get_inventory_projection"),
+    IssueType.EXCESS_INVENTORY: ("get_issue_context", "get_inventory_projection"),
 }
 
 CAUSAL_NODES = (

@@ -110,12 +110,18 @@ def build_sku_state(
     lead_time_days: int,
     rows: list[SKUDailyMetric],
     as_of: date,
+    campaign_rows: list[CampaignDailyMetric] | None = None,
 ) -> SKUState:
     cur_start, cur_end = window(as_of, 7)
+    prev_start, prev_end = window(as_of, 7, offset_end=7)
     long_start, long_end = window(as_of, 30)
     cur = filter_sku(rows, sku_id, cur_start, cur_end)
     long = filter_sku(rows, sku_id, long_start, long_end)
     br = decompose_profit(cur)
+    camps = [r for r in (campaign_rows or []) if r.sku_id == sku_id]
+    cur_c = [r for r in camps if in_window(r.metric_date, cur_start, cur_end)]
+    prev_c = [r for r in camps if in_window(r.metric_date, prev_start, prev_end)]
+    long_c = [r for r in camps if in_window(r.metric_date, long_start, long_end)]
     return SKUState(
         sku_id=sku_id,
         category=category,
@@ -134,6 +140,12 @@ def build_sku_state(
         conversion_rate_7d=_cvr(cur),
         refund_rate_7d=_refund_rate(cur),
         avg_rating_30d=_avg_rating(long),
+        ad_spend_7d=sum((r.spend for r in cur_c), Decimal("0")),
+        roas_7d=_roas(cur_c),
+        roas_prev_7d=_roas(prev_c),
+        roas_30d=_roas(long_c),
+        paid_traffic_7d=sum(r.clicks for r in cur_c),
+        ad_conversions_7d=sum(r.conversions for r in cur_c),
     )
 
 

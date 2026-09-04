@@ -11,6 +11,7 @@ from evals.diagnosis.metrics import (
     irrelevant_tool_rate,
     root_cause_accuracy,
     tool_efficiency,
+    unnecessary_investigation_rate,
 )
 from services.daily_run import run_daily
 from tools.diagnosis.investigate import context_from_run
@@ -36,6 +37,7 @@ def _score(spec: dict, outcome, expect_insufficient: bool) -> dict:
         "irrelevant_tool_rate": irrelevant_tool_rate(outcome),
         "hallucination_rate": hallucination_rate(outcome.report, outcome.state),
         "correct_escalation": correct_escalation(outcome.report, expect_insufficient),
+        "unnecessary_investigation_rate": unnecessary_investigation_rate(outcome),
     }
 
 
