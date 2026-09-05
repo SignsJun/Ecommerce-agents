@@ -212,3 +212,96 @@ def activating_llm(cause_type: str) -> FakeLLM:
         )
 
     return FakeLLM(complete)
+
+
+def scripted_strategy_llm(issue_type: IssueType) -> FakeLLM:
+    from agents.decision.schema import LLMActionDraft, LLMStrategyDraft, StrategyPlanDraft
+
+    def complete(system: str, user: str, schema: type) -> object:
+        payload = _load(user)
+        sku = payload.get("sku_id") or (payload.get("issue") or {}).get("entity_id") or ""
+        cids = list(payload.get("campaign_ids") or [])
+        cid = cids[0] if cids else "CAMP_MISSING"
+        if issue_type == IssueType.PROFIT_EROSION:
+            return StrategyPlanDraft(
+                strategies=[
+                    LLMStrategyDraft(
+                        name="Conservative",
+                        strategy_type="conservative",
+                        actions=[
+                            LLMActionDraft(action_type="adjust_ad_budget", target_id=cid, intensity="strong"),
+                            LLMActionDraft(action_type="update_listing", target_id=sku, intensity="standard"),
+                        ],
+                    ),
+                    LLMStrategyDraft(
+                        name="Balanced",
+                        strategy_type="balanced",
+                        actions=[
+                            LLMActionDraft(action_type="adjust_ad_budget", target_id=cid, intensity="standard"),
+                        ],
+                    ),
+                ]
+            )
+        if issue_type == IssueType.AD_INEFFICIENCY:
+            return StrategyPlanDraft(
+                strategies=[
+                    LLMStrategyDraft(
+                        name="Conservative",
+                        strategy_type="conservative",
+                        actions=[LLMActionDraft(action_type="adjust_ad_budget", target_id=cid, intensity="standard")],
+                    ),
+                    LLMStrategyDraft(
+                        name="Balanced",
+                        strategy_type="balanced",
+                        actions=[LLMActionDraft(action_type="adjust_ad_budget", target_id=cid, intensity="mild")],
+                    ),
+                ]
+            )
+        if issue_type == IssueType.STOCKOUT_RISK:
+            return StrategyPlanDraft(
+                strategies=[
+                    LLMStrategyDraft(
+                        name="Conservative",
+                        strategy_type="conservative",
+                        actions=[LLMActionDraft(action_type="replenish", target_id=sku, intensity="mild")],
+                    ),
+                    LLMStrategyDraft(
+                        name="Balanced",
+                        strategy_type="balanced",
+                        actions=[LLMActionDraft(action_type="replenish", target_id=sku, intensity="standard")],
+                    ),
+                ]
+            )
+        return StrategyPlanDraft(
+            strategies=[
+                LLMStrategyDraft(
+                    name="Conservative",
+                    strategy_type="conservative",
+                    actions=[LLMActionDraft(action_type="adjust_ad_budget", target_id=cid, intensity="standard")],
+                ),
+                LLMStrategyDraft(
+                    name="Balanced",
+                    strategy_type="balanced",
+                    actions=[LLMActionDraft(action_type="adjust_price", target_id=sku, intensity="mild")],
+                ),
+            ]
+        )
+
+    return FakeLLM(complete)
+
+
+def unknown_target_strategy_llm() -> FakeLLM:
+    from agents.decision.schema import LLMActionDraft, LLMStrategyDraft, StrategyPlanDraft
+
+    def complete(system: str, user: str, schema: type) -> object:
+        return StrategyPlanDraft(
+            strategies=[
+                LLMStrategyDraft(
+                    name="Invented",
+                    strategy_type="balanced",
+                    actions=[LLMActionDraft(action_type="adjust_ad_budget", target_id="CAMP_999", intensity="standard")],
+                )
+            ]
+        )
+
+    return FakeLLM(complete)

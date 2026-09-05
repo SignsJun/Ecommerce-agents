@@ -1,10 +1,11 @@
 import argparse
 from pathlib import Path
 
+from agents.decision.agent import format_plan_trace, plan, plan_from_rules
 from agents.diagnosis.agent import diagnose, format_diagnosis_trace
 from agents.llm.client import LLMUnavailable
 from agents.llm.factory import llm_from_settings
-from agents.llm.scripts import scripted_llm
+from agents.llm.scripts import scripted_llm, scripted_strategy_llm
 from app.config.settings import Settings
 from domain.enums import IssueType
 from services.daily_run import run_daily
@@ -35,6 +36,11 @@ def main(argv: list[str] | None = None) -> int:
     diag.add_argument("--data-dir", type=Path, default=None)
     diag.add_argument("--issue-id", type=str, default=None)
     diag.add_argument("--fake-llm", action="store_true")
+    pln = sub.add_parser("plan")
+    pln.add_argument("--data-dir", type=Path, default=None)
+    pln.add_argument("--issue-id", type=str, default=None)
+    pln.add_argument("--fake-llm", action="store_true")
+    pln.add_argument("--rule-baseline", action="store_true")
     args = parser.parse_args(argv)
     settings = Settings()
     data_dir = args.data_dir or settings.data_dir
@@ -63,21 +69,30 @@ def main(argv: list[str] | None = None) -> int:
         print("issue not found")
         return 1
     if args.fake_llm:
-        llm = scripted_llm(issue.issue_type)
+        diag_llm = scripted_llm(issue.issue_type)
+        strat_llm = scripted_strategy_llm(issue.issue_type)
     else:
         try:
-            llm = llm_from_settings(settings)
+            diag_llm = llm_from_settings(settings)
         except LLMUnavailable as exc:
             print(str(exc))
             return 1
-    outcome = diagnose(issue, ctx, llm)
+        strat_llm = diag_llm
+    outcome = diagnose(issue, ctx, diag_llm)
     report = outcome.report
     print(
         f"diagnose\tissue={issue.issue_id}\tstatus={report.status}\t"
         f"tools={report.tool_calls_used}\tirrelevant={outcome.irrelevant_tool_requests}\t"
         f"coverage={report.active_investigation_coverage}\tmodel={report.model_version}"
     )
-    print(format_diagnosis_trace(outcome))
+    if args.cmd == "diagnose":
+        print(format_diagnosis_trace(outcome))
+        return 0
+    if args.rule_baseline:
+        planned = plan_from_rules(issue, report, ctx)
+    else:
+        planned = plan(issue, report, ctx, strat_llm)
+    print(format_plan_trace(planned))
     return 0
 
 

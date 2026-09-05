@@ -77,3 +77,12 @@ def test_cli_diagnose_missing_key(tmp_path, capsys, monkeypatch):
     code = main(["diagnose", "--data-dir", str(data_dir)])
     assert code == 1
     assert "missing ECOM_LLM_API_KEY" in capsys.readouterr().out
+
+
+def test_cli_plan_fake(tmp_path, capsys):
+    data_dir = write_mini_olist(tmp_path / "olist")
+    code = main(["plan", "--data-dir", str(data_dir), "--fake-llm"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "generation_source=llm" in out
+    assert "selected=" in out
