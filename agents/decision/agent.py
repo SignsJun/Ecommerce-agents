@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace
 from uuid import uuid4
 
 from agents.decision.context import PROMPT_VERSION, build_plan_context, load_system_prompt
@@ -13,6 +13,7 @@ from domain.diagnosis.report import DiagnosisReport
 from domain.enums import DecisionPhase
 from domain.issue.models import Issue
 from domain.strategy.validation import StrategyValidationResult
+from services.simulation.runner import simulate_strategies
 from services.strategy.baseline import RankResult, rank_without_simulation
 from services.strategy.templates import rule_plan_draft
 from services.strategy.validator import validate_strategy
@@ -137,5 +138,62 @@ def format_plan_trace(outcome: PlanOutcome) -> str:
         lines.append(
             f"strategy\t{item.strategy.strategy_id}\t{item.strategy.strategy_type}\t"
             f"feasible={feasible}\treject={reason if not feasible else '-'}\t{acts}"
+        )
+    return "\n".join(lines)
+
+
+def attach_simulations(
+    outcome: PlanOutcome,
+    ctx: ToolContext,
+    *,
+    seed: int = 42,
+    n: int = 32,
+    horizon: int | None = None,
+    open_loop: bool = False,
+    llm: LLMClient | None = None,
+) -> PlanOutcome:
+    selected = outcome.state.selected_strategy_id
+    reports = simulate_strategies(
+        ctx.snapshot(),
+        ctx.policy,
+        list(outcome.state.candidate_strategies),
+        outcome.state.issue.entity_id,
+        horizon=horizon,
+        seed=seed,
+        n=n,
+        now=ctx.now,
+        open_loop=open_loop,
+        llm=llm,
+    )
+    state = outcome.state.model_copy(
+        update={
+            "simulation_reports": reports,
+            "phase": DecisionPhase.EVALUATING,
+            "updated_at": ctx.now,
+            "selected_strategy_id": selected,
+        }
+    )
+    return replace(outcome, state=state)
+
+
+def format_simulation_trace(outcome: PlanOutcome) -> str:
+    reports = outcome.state.simulation_reports
+    if not reports:
+        return "simulate\tnone"
+    base = next((r.baseline_profit for r in reports), None)
+    adaptive = any(r.adaptive for r in reports)
+    lines = [
+        f"simulate\tselected={outcome.state.selected_strategy_id}\treports={len(reports)}\t"
+        f"adaptive={adaptive}\tpreferred={outcome.state.sim_preferred_strategy_id}\t"
+        f"experiment={outcome.state.experiment_status or '-'}",
+    ]
+    for row in reports:
+        delta = row.expected_profit - row.baseline_profit if base is not None else row.expected_profit
+        mark = "*" if row.strategy_id == outcome.state.selected_strategy_id else ""
+        scene = row.scenario_results[0].scenario_id if row.scenario_results else "base"
+        lines.append(
+            f"sim{mark}\t{row.strategy_id}\t{scene}\tprofit={row.expected_profit}\tp10={row.profit_p10}\t"
+            f"p50={row.profit_p50}\tp90={row.profit_p90}\tstockout={row.stockout_probability:.2f}\t"
+            f"stability={row.stability_horizon_days}\tinterventions={row.mean_interventions:.2f}\tvs_base={delta}"
         )
     return "\n".join(lines)

@@ -19,6 +19,8 @@ class DecisionState(FrozenModel):
     simulation_reports: list[SimulationReport] = []
     rejected_strategy_ids: list[str] = []
     selected_strategy_id: str | None = None
+    experiment_status: str | None = None
+    sim_preferred_strategy_id: str | None = None
     approval: ApprovalState | None = None
     execution: ExecutionState | None = None
     monitoring: MonitoringState | None = None

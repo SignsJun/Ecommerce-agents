@@ -1,11 +1,12 @@
 import argparse
 from pathlib import Path
 
-from agents.decision.agent import format_plan_trace, plan, plan_from_rules
+from agents.decision.agent import attach_simulations, format_plan_trace, format_simulation_trace, plan, plan_from_rules
 from agents.diagnosis.agent import diagnose, format_diagnosis_trace
 from agents.llm.client import LLMUnavailable
 from agents.llm.factory import llm_from_settings
 from agents.llm.scripts import scripted_llm, scripted_strategy_llm
+from agents.simulation.agent import format_experiment_trace, run_experiments
 from app.config.settings import Settings
 from domain.enums import IssueType
 from services.daily_run import run_daily
@@ -41,6 +42,13 @@ def main(argv: list[str] | None = None) -> int:
     pln.add_argument("--issue-id", type=str, default=None)
     pln.add_argument("--fake-llm", action="store_true")
     pln.add_argument("--rule-baseline", action="store_true")
+    sim = sub.add_parser("simulate")
+    sim.add_argument("--data-dir", type=Path, default=None)
+    sim.add_argument("--issue-id", type=str, default=None)
+    sim.add_argument("--fake-llm", action="store_true")
+    sim.add_argument("--rule-baseline", action="store_true")
+    sim.add_argument("--open-loop", action="store_true")
+    sim.add_argument("--experiment", action="store_true")
     args = parser.parse_args(argv)
     settings = Settings()
     data_dir = args.data_dir or settings.data_dir
@@ -93,6 +101,23 @@ def main(argv: list[str] | None = None) -> int:
     else:
         planned = plan(issue, report, ctx, strat_llm)
     print(format_plan_trace(planned))
+    if args.cmd == "plan":
+        return 0
+    planned = attach_simulations(
+        planned,
+        ctx,
+        open_loop=getattr(args, "open_loop", False),
+        llm=None if args.fake_llm else strat_llm,
+    )
+    print(format_simulation_trace(planned))
+    if getattr(args, "experiment", False):
+        exp = run_experiments(
+            planned,
+            ctx,
+            llm=None if args.fake_llm else strat_llm,
+            open_loop=getattr(args, "open_loop", False),
+        )
+        print(format_experiment_trace(exp))
     return 0
 
 
