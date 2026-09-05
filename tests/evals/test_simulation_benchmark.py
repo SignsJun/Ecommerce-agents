@@ -47,9 +47,10 @@ def test_attach_keeps_selected(tmp_path):
     daily, ctx, _, _ = _ctx(tmp_path)
     issue = next(i for i in daily.issues if i.issue_type == IssueType.AD_INEFFICIENCY and i.entity_id == "sku_ad_inefficiency")
     planned = plan(issue, _report(issue, ("ad_efficiency",)), ctx, scripted_strategy_llm(IssueType.AD_INEFFICIENCY))
-    selected = planned.state.selected_strategy_id
+    selected = planned.state.initial_preferred_strategy_id
     simmed = attach_simulations(planned, ctx, n=4, seed=1)
-    assert simmed.state.selected_strategy_id == selected
+    assert simmed.state.initial_preferred_strategy_id == selected
+    assert 1 <= len(simmed.state.final_recommendations) <= 3
     assert len(simmed.state.simulation_reports) >= 2
 
 
@@ -66,6 +67,7 @@ def test_simulation_benchmark(tmp_path):
         assert a["has_do_nothing"]
         assert a["adaptive"]
         assert a["open_loop_static"]
+        assert 1 <= a["n_recs"] <= 3
         assert [r.expected_profit for r in a["reports"]] == [r.expected_profit for r in b["reports"]]
     stock = next(r for r in rows if r["scenario_id"] == "sku_stockout_risk")
     noop = next(x for x in stock["reports"] if x.strategy_id == "ST_do_nothing")

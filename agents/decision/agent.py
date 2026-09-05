@@ -7,6 +7,7 @@ from agents.decision.context import PROMPT_VERSION, build_plan_context, load_sys
 from agents.decision.materialize import MaterializedStrategy, do_nothing_strategy, materialize_draft
 from agents.decision.schema import StrategyPlanDraft
 from agents.llm.client import LLMClient, LLMUnavailable
+from agents.simulation.evaluate import evaluate_recommendations, format_recommendation_set
 from domain.decision.approval import ApprovalState
 from domain.decision.state import DecisionState
 from domain.diagnosis.report import DiagnosisReport
@@ -78,7 +79,7 @@ def _finish(
         candidate_strategies=[it.strategy for it in kept],
         simulation_reports=[],
         rejected_strategy_ids=rejected_ids,
-        selected_strategy_id=ranked.selected.strategy.strategy_id,
+        initial_preferred_strategy_id=ranked.selected.strategy.strategy_id,
         approval=approval,
         execution=None,
         monitoring=None,
@@ -126,7 +127,7 @@ def format_plan_trace(outcome: PlanOutcome) -> str:
     status = report.status if report else "-"
     lines = [
         f"plan\tgeneration_source={outcome.generation_source}\tdiagnosis={status}",
-        f"selected={outcome.state.selected_strategy_id}\tneeds_simulation={outcome.needs_simulation}\t"
+        f"initial={outcome.state.initial_preferred_strategy_id}\tneeds_simulation={outcome.needs_simulation}\t"
         f"approval_required={outcome.approval_required}\tconfidence={outcome.recommendation_confidence}",
     ]
     by_id = {v.strategy_id: v for v in outcome.validations}
@@ -152,7 +153,7 @@ def attach_simulations(
     open_loop: bool = False,
     llm: LLMClient | None = None,
 ) -> PlanOutcome:
-    selected = outcome.state.selected_strategy_id
+    selected = outcome.state.initial_preferred_strategy_id
     reports = simulate_strategies(
         ctx.snapshot(),
         ctx.policy,
@@ -165,12 +166,15 @@ def attach_simulations(
         open_loop=open_loop,
         llm=llm,
     )
+    recs, rejected_eval = evaluate_recommendations(reports, list(outcome.state.candidate_strategies), outcome.state.experiment_status)
     state = outcome.state.model_copy(
         update={
             "simulation_reports": reports,
             "phase": DecisionPhase.EVALUATING,
             "updated_at": ctx.now,
-            "selected_strategy_id": selected,
+            "initial_preferred_strategy_id": selected,
+            "final_recommendations": recs,
+            "rejected_after_eval": rejected_eval,
         }
     )
     return replace(outcome, state=state)
@@ -183,17 +187,17 @@ def format_simulation_trace(outcome: PlanOutcome) -> str:
     base = next((r.baseline_profit for r in reports), None)
     adaptive = any(r.adaptive for r in reports)
     lines = [
-        f"simulate\tselected={outcome.state.selected_strategy_id}\treports={len(reports)}\t"
-        f"adaptive={adaptive}\tpreferred={outcome.state.sim_preferred_strategy_id}\t"
-        f"experiment={outcome.state.experiment_status or '-'}",
+        f"simulate\tinitial={outcome.state.initial_preferred_strategy_id}\treports={len(reports)}\t"
+        f"adaptive={adaptive}\texperiment={outcome.state.experiment_status or '-'}",
     ]
     for row in reports:
         delta = row.expected_profit - row.baseline_profit if base is not None else row.expected_profit
-        mark = "*" if row.strategy_id == outcome.state.selected_strategy_id else ""
+        mark = "*" if row.strategy_id == outcome.state.initial_preferred_strategy_id else ""
         scene = row.scenario_results[0].scenario_id if row.scenario_results else "base"
         lines.append(
             f"sim{mark}\t{row.strategy_id}\t{scene}\tprofit={row.expected_profit}\tp10={row.profit_p10}\t"
             f"p50={row.profit_p50}\tp90={row.profit_p90}\tstockout={row.stockout_probability:.2f}\t"
             f"stability={row.stability_horizon_days}\tinterventions={row.mean_interventions:.2f}\tvs_base={delta}"
         )
+    lines.append(format_recommendation_set(outcome.state.final_recommendations, outcome.state.rejected_after_eval))
     return "\n".join(lines)

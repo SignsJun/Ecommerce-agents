@@ -23,15 +23,17 @@ def run_simulation_benchmark(data_dir, now, settings, *, n: int = 8, seed: int =
         issue = _match(daily, spec)
         report = diagnose(issue, ctx, scripted_llm(IssueType(spec["issue_type"]))).report
         planned = plan(issue, report, ctx, scripted_strategy_llm(IssueType(spec["issue_type"])))
-        selected = planned.state.selected_strategy_id
+        selected = planned.state.initial_preferred_strategy_id
         simmed = attach_simulations(planned, ctx, seed=seed, n=n)
         open_loop = attach_simulations(planned, ctx, seed=seed, n=n, open_loop=True)
         reports = simmed.state.simulation_reports
+        recs = simmed.state.final_recommendations
         rows.append(
             {
                 "scenario_id": spec["scenario_id"],
-                "selected": simmed.state.selected_strategy_id,
-                "selected_unchanged": simmed.state.selected_strategy_id == selected,
+                "selected": simmed.state.initial_preferred_strategy_id,
+                "selected_unchanged": simmed.state.initial_preferred_strategy_id == selected,
+                "n_recs": len(recs),
                 "n_reports": len(reports),
                 "ordered": all(r.profit_p10 <= r.profit_p50 <= r.profit_p90 for r in reports),
                 "has_do_nothing": any(r.strategy_id == "ST_do_nothing" for r in reports),

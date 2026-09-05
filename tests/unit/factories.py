@@ -227,7 +227,7 @@ def decision_state() -> DecisionState:
         candidate_strategies=[strategy()],
         simulation_reports=[simulation_report()],
         rejected_strategy_ids=[],
-        selected_strategy_id="STRAT_B",
+        initial_preferred_strategy_id="STRAT_B",
         approval=ApprovalState(
             required=True,
             status="pending",

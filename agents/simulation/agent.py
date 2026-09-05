@@ -9,12 +9,13 @@ from agents.simulation.compare import (
     base_reports,
     has_stress_for,
     ranking_flipped,
-    robust_pick,
     scenario_of,
 )
 from agents.simulation.context import PROMPT_VERSION, build_experiment_context, load_system_prompt
+from agents.simulation.evaluate import evaluate_recommendations, format_recommendation_set
 from agents.simulation.planner import _selected, rule_plan
 from agents.simulation.schema import ExperimentChoice
+from domain.decision.recommendation import StrategyRecommendation
 from domain.enums import DecisionPhase
 from services.simulation.params import SimulatorParameterSet
 from services.simulation.runner import simulate_strategies
@@ -29,7 +30,7 @@ MAX_STRESS = 4
 class ExperimentOutcome:
     plan: PlanOutcome
     experiment_status: str
-    sim_preferred_strategy_id: str | None
+    recommendations: list[StrategyRecommendation]
     jobs_used: int
     stress_jobs: int
     trace: list[str]
@@ -89,7 +90,7 @@ def run_experiments(
     max_jobs: int = MAX_JOBS,
     max_stress: int = MAX_STRESS,
 ) -> ExperimentOutcome:
-    selected = outcome.state.selected_strategy_id
+    selected = outcome.state.initial_preferred_strategy_id
     if not outcome.state.simulation_reports:
         outcome = attach_simulations(outcome, ctx, seed=seed, n=n, open_loop=open_loop, llm=llm)
     reports = list(outcome.state.simulation_reports)
@@ -166,22 +167,23 @@ def run_experiments(
             done.add((choice.name, sid))
     if status is None:
         status = "budget_exhausted"
-    preferred = robust_pick(reports)
+    recs, rejected_eval = evaluate_recommendations(reports, strategies, status)
     state = outcome.state.model_copy(
         update={
             "simulation_reports": reports,
             "phase": DecisionPhase.EVALUATING,
             "updated_at": ctx.now,
-            "selected_strategy_id": selected,
+            "initial_preferred_strategy_id": selected,
             "experiment_status": status,
-            "sim_preferred_strategy_id": preferred,
+            "final_recommendations": recs,
+            "rejected_after_eval": rejected_eval,
         }
     )
     planned = replace(outcome, state=state)
     return ExperimentOutcome(
         plan=planned,
         experiment_status=status,
-        sim_preferred_strategy_id=preferred,
+        recommendations=recs,
         jobs_used=jobs_used,
         stress_jobs=stress_jobs,
         trace=trace,
@@ -190,8 +192,14 @@ def run_experiments(
 
 def format_experiment_trace(outcome: ExperimentOutcome) -> str:
     lines = [
-        f"experiment\tstatus={outcome.experiment_status}\tpreferred={outcome.sim_preferred_strategy_id}\t"
-        f"jobs={outcome.jobs_used}\tstress={outcome.stress_jobs}\tselected={outcome.plan.state.selected_strategy_id}"
+        f"experiment\tstatus={outcome.experiment_status}\tjobs={outcome.jobs_used}\t"
+        f"stress={outcome.stress_jobs}\tinitial={outcome.plan.state.initial_preferred_strategy_id}"
     ]
     lines.extend(outcome.trace)
+    lines.append(
+        format_recommendation_set(
+            outcome.plan.state.final_recommendations,
+            outcome.plan.state.rejected_after_eval,
+        )
+    )
     return "\n".join(lines)

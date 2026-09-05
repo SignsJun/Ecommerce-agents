@@ -85,7 +85,7 @@ def test_cli_plan_fake(tmp_path, capsys):
     assert code == 0
     out = capsys.readouterr().out
     assert "generation_source=llm" in out
-    assert "selected=" in out
+    assert "initial=" in out
 
 
 def test_cli_simulate_fake(tmp_path, capsys):
@@ -95,3 +95,4 @@ def test_cli_simulate_fake(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "simulate" in out
     assert "profit=" in out
+    assert "recommend" in out

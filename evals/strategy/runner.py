@@ -23,7 +23,7 @@ def _row(spec, planned, report) -> dict:
         "scenario_id": spec["scenario_id"],
         "diagnosis_status": report.status,
         "generation_source": planned.generation_source,
-        "selected": planned.state.selected_strategy_id,
+        "selected": planned.state.initial_preferred_strategy_id,
         "feasible": sum(1 for v in planned.validations if v.feasible),
         "feasibility_rate": feasibility_rate(planned),
         "constraint_violation_rate": constraint_violation_rate(planned),

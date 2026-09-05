@@ -90,13 +90,15 @@ def test_experiments_keep_selected_and_budget(tmp_path):
     daily, ctx = _ctx(tmp_path)
     issue = next(i for i in daily.issues if i.issue_type == IssueType.AD_INEFFICIENCY and i.entity_id == "sku_ad_inefficiency")
     planned = plan(issue, _report(issue, ("ad_efficiency",)), ctx, scripted_strategy_llm(IssueType.AD_INEFFICIENCY))
-    selected = planned.state.selected_strategy_id
+    selected = planned.state.initial_preferred_strategy_id
     simmed = attach_simulations(planned, ctx, n=2, seed=1)
     a = run_experiments(simmed, ctx, llm=None, n=2, seed=1)
     b = run_experiments(simmed, ctx, llm=None, n=2, seed=1)
-    assert a.plan.state.selected_strategy_id == selected
+    assert a.plan.state.initial_preferred_strategy_id == selected
     assert a.jobs_used <= 20
     assert a.stress_jobs <= 4
+    assert 1 <= len(a.plan.state.final_recommendations) <= 3
+    assert [r.rank for r in a.plan.state.final_recommendations] == list(range(1, len(a.plan.state.final_recommendations) + 1))
     target = selected if selected != "ST_do_nothing" else None
     if target:
         assert has_stress_for(a.plan.state.simulation_reports, target)

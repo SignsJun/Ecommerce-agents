@@ -17,4 +17,6 @@ def test_experiment_benchmark(tmp_path):
         assert a["has_stress"]
         assert a["jobs"] <= 20
         assert a["status"] in {"sufficient", "uncertain", "budget_exhausted"}
+        assert 1 <= a["n_recs"] <= 3
+        assert a["ranks"] == list(range(1, a["n_recs"] + 1))
         assert a["profits"] == b["profits"]

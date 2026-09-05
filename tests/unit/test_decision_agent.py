@@ -61,7 +61,7 @@ def test_plan_does_not_call_diagnose(tmp_path):
 
     planned = plan(issue, _report(issue), ctx, FakeLLM(boom))
     assert planned.generation_source == "llm"
-    assert planned.state.selected_strategy_id
+    assert planned.state.initial_preferred_strategy_id
     assert planned.state.candidate_strategies
 
 
@@ -74,7 +74,7 @@ def test_unknown_target_rejected(tmp_path):
     invented = [v for v in planned.validations if any(e.code == "UNKNOWN_TARGET_ID" for e in v.errors)]
     assert invented
     assert all(v.strategy_id in planned.state.rejected_strategy_ids for v in invented)
-    assert planned.state.selected_strategy_id == "ST_do_nothing"
+    assert planned.state.initial_preferred_strategy_id == "ST_do_nothing"
 
 
 def test_insufficient_only_do_nothing(tmp_path):
@@ -86,7 +86,7 @@ def test_insufficient_only_do_nothing(tmp_path):
 
     report = _report(issue, status="insufficient_evidence", causes=())
     planned = plan(issue, report, ctx, FakeLLM(boom))
-    assert planned.state.selected_strategy_id == "ST_do_nothing"
+    assert planned.state.initial_preferred_strategy_id == "ST_do_nothing"
     assert planned.generation_source == "llm"
 
 
@@ -125,8 +125,8 @@ def test_four_types_llm_and_rule(tmp_path):
         rule_out = plan_from_rules(issue, report, ctx)
         assert llm_out.generation_source == "llm"
         assert rule_out.generation_source == "rule"
-        assert llm_out.state.selected_strategy_id
-        assert rule_out.state.selected_strategy_id
+        assert llm_out.state.initial_preferred_strategy_id
+        assert rule_out.state.initial_preferred_strategy_id
         assert any(v.feasible for v in llm_out.validations)
         assert any(v.feasible for v in rule_out.validations)
 
@@ -140,4 +140,4 @@ def test_llm_fallback_source(tmp_path):
 
     planned = plan(issue, _report(issue), ctx, FakeLLM(boom))
     assert planned.generation_source == "llm_fallback"
-    assert planned.state.selected_strategy_id
+    assert planned.state.initial_preferred_strategy_id

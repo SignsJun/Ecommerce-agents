@@ -24,7 +24,7 @@ def build_experiment_context(
 ) -> str:
     body = {
         "task": "Choose one ExperimentChoice. kind is stress, sensitivity, or stop. name must be a catalog id. Do not write percents or profits to compute.",
-        "selected_strategy_id": selected_id,
+        "initial_preferred_strategy_id": selected_id,
         "catalog": CATALOG,
         "remaining_jobs": remaining_jobs,
         "remaining_stress": remaining_stress,
