@@ -52,6 +52,7 @@ def run_daily(
     snapshot_repo: InMemorySnapshotRepository | None = None,
     issue_repo: InMemoryIssueRepository | None = None,
     now: datetime | None = None,
+    snapshot_id: str | None = None,
 ) -> DailyRunResult:
     settings = settings or Settings()
     policy = policy or default_policy()
@@ -87,7 +88,7 @@ def run_daily(
     snapshot = build_snapshot(
         ops,
         as_of=as_of,
-        snapshot_id=f"SNAP_{settings.store_id}_{as_of.isoformat()}_{version}",
+        snapshot_id=snapshot_id or f"SNAP_{settings.store_id}_{as_of.isoformat()}_{version}",
         version=version,
         created_at=now,
         data_freshness_at=freshness,

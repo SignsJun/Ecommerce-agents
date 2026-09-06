@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_model: str = "deepseek-chat"
     decisions_dir: Path = Path("data/decisions")
+    runs_dir: Path = Path("data/runs")
+    uploads_dir: Path = Path("data/raw/uploads")
 
 
 def default_policy() -> BusinessPolicyConfig:

@@ -27,3 +27,6 @@ class InMemoryIssueRepository:
 
     def list_evidence(self, evidence_ids: list[str]) -> list[Evidence]:
         return [self._evidence[eid] for eid in evidence_ids if eid in self._evidence]
+
+    def list_all_evidence(self) -> list[Evidence]:
+        return list(self._evidence.values())
