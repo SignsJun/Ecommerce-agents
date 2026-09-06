@@ -21,13 +21,15 @@ def build_experiment_context(
     remaining_jobs: int,
     remaining_stress: int,
     done: set[tuple[str, str]],
+    allowed: list[tuple[str, str]] | None = None,
 ) -> str:
     body = {
-        "task": "Choose one ExperimentChoice. kind is stress, sensitivity, or stop. name must be a catalog id. Do not write percents or profits to compute.",
+        "task": "Pick one job from allowed. Stop only if allowed is empty. Do not write percents or profits to compute.",
         "initial_preferred_strategy_id": selected_id,
         "catalog": CATALOG,
         "remaining_jobs": remaining_jobs,
         "remaining_stress": remaining_stress,
+        "allowed": [{"name": n, "strategy_id": s, "kind": CATALOG.get(n)} for n, s in (allowed or [])],
         "done": [f"{n}:{s}" for n, s in sorted(done)],
         "strategies": [
             {

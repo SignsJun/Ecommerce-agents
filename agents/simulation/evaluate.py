@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from agents.simulation.compare import base_reports, has_stress_for, ranking_flipped, scenario_of
+from agents.simulation.compare import base_reports, ranking_flipped, scenario_of
+from agents.simulation.relevance import relevant_rows
 from domain.decision.recommendation import StrategyRecommendation
 from domain.simulation.report import SimulationReport
 from domain.strategy.models import Strategy
@@ -23,6 +24,7 @@ class _Agg:
     stability: int
     vs_baseline: Decimal
     fragile: bool
+    tested: bool
 
 
 def _is_noop(sid: str, strategies: list[Strategy]) -> bool:
@@ -44,8 +46,14 @@ def _agg(sid: str, rows: list[SimulationReport], strategies: list[Strategy], bas
     base = max(bases, key=lambda r: r.expected_profit)
     worst = min(rows, key=lambda r: r.expected_profit)
     min_p10 = min(r.profit_p10 for r in rows)
-    stress = [r for r in rows if scenario_of(r) != "base"]
-    fragile = bool(stress) and any(r.expected_profit + Decimal("1") < base.expected_profit for r in stress)
+    strategy = next((s for s in strategies if s.strategy_id == sid), None)
+    if strategy is not None:
+        relevant = relevant_rows(strategy, rows)
+    elif _is_noop(sid, strategies):
+        relevant = [r for r in rows if scenario_of(r) != "base" and scenario_of(r) == "demand_down"]
+    else:
+        relevant = []
+    fragile = bool(relevant) and any(r.expected_profit + Decimal("1") < base.expected_profit for r in relevant)
     return _Agg(
         strategy_id=sid,
         noop=_is_noop(sid, strategies),
@@ -57,6 +65,7 @@ def _agg(sid: str, rows: list[SimulationReport], strategies: list[Strategy], bas
         stability=base.stability_horizon_days,
         vs_baseline=base.expected_profit - baseline,
         fragile=fragile,
+        tested=bool(relevant),
     )
 
 
@@ -100,7 +109,7 @@ def _confidence(reports: list[SimulationReport], status: str | None, survivors: 
     others = [r for r in reports if scenario_of(r) != "base"]
     if others and ranking_flipped(base, others):
         return "low"
-    if any(has_stress_for(reports, a.strategy_id) for a in survivors):
+    if survivors and all(a.tested for a in survivors):
         return "high"
     return "medium"
 
@@ -124,7 +133,9 @@ def _labels(item: _Agg, rec_type: str) -> tuple[list[str], list[str], list[str]]
         strengths.append("no_cash_outlay")
     elif item.cash > 0:
         risks.append("cash_required")
-    if item.fragile:
+    if not item.tested:
+        risks.append("stress_untested")
+    elif item.fragile:
         risks.append("fragile_under_stress")
     else:
         strengths.append("stable_under_stress")

@@ -5,7 +5,9 @@ from agents.decision.agent import attach_simulations, plan
 from agents.llm.scripts import scripted_strategy_llm
 from agents.simulation.agent import run_experiments
 from agents.simulation.catalog import scenario_jobs
-from agents.simulation.compare import has_stress_for, ranking_flipped
+from agents.simulation.compare import has_stress_for, ranking_flipped, scenario_of
+from agents.simulation.relevance import needed_scenarios
+from domain.strategy.actions import AdjustAdBudget
 from app.config.settings import Settings
 from domain.diagnosis.hypothesis import RootCause
 from domain.diagnosis.report import DiagnosisReport
@@ -105,3 +107,42 @@ def test_experiments_keep_selected_and_budget(tmp_path):
     assert [r.expected_profit for r in a.plan.state.simulation_reports] == [
         r.expected_profit for r in b.plan.state.simulation_reports
     ]
+
+
+def test_needed_scenarios_match_actions():
+    from domain.strategy.actions import PauseCampaign, UpdateListing
+
+    pause = f.strategy().model_copy(
+        update={"actions": [PauseCampaign(action_type="pause_campaign", campaign_id="CMP_A")]}
+    )
+    listed = f.strategy().model_copy(
+        update={
+            "actions": [
+                AdjustAdBudget(action_type="adjust_ad_budget", campaign_id="CMP_A", change_pct=-0.1),
+                UpdateListing(action_type="update_listing", sku_id="SKU_A", target_issue="refunds"),
+            ]
+        }
+    )
+    assert needed_scenarios(pause) == ("demand_down",)
+    assert needed_scenarios(listed) == ("roas_down", "listing_worse")
+    noop = f.strategy().model_copy(update={"strategy_id": "ST_do_nothing", "actions": []})
+    assert needed_scenarios(noop) == ("demand_down",)
+
+
+def test_experiments_cover_listing_and_baseline(tmp_path):
+    daily, ctx = _ctx(tmp_path)
+    issue = next(i for i in daily.issues if i.issue_type == IssueType.PROFIT_EROSION and i.entity_id == "sku_profit_erosion")
+    planned = plan(issue, _report(issue, ("ad_efficiency", "refunds")), ctx, scripted_strategy_llm(IssueType.PROFIT_EROSION))
+    simmed = attach_simulations(planned, ctx, n=2, seed=1)
+    exp = run_experiments(simmed, ctx, llm=None, n=2, seed=1)
+    scenes = {scenario_of(r) for r in exp.plan.state.simulation_reports}
+    assert "listing_worse" in scenes
+    jobs = [line for line in exp.trace if line.startswith("job\t")]
+    assert any("listing_worse" in line for line in jobs)
+    acted = next(
+        r
+        for r in exp.plan.state.simulation_reports
+        if scenario_of(r) != "base" and r.strategy_id != "ST_do_nothing"
+    )
+    assert acted.baseline_profit != 0
+    assert acted.expected_profit - acted.baseline_profit != acted.expected_profit

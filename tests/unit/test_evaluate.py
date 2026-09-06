@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from agents.simulation.evaluate import evaluate_recommendations
 from domain.simulation.models import ScenarioResult
-from domain.strategy.actions import AdjustAdBudget, AdjustPrice
+from domain.strategy.actions import AdjustAdBudget, AdjustPrice, PauseCampaign
 from tests.unit import factories as f
 
 
@@ -115,3 +115,50 @@ def test_price_cut_not_unique_winner():
     assert "ST_cut" in rejected
     assert recs[0].strategy_id == "ST_do_nothing"
     assert recs[0].recommendation_type == "status_quo"
+
+
+def test_untested_not_labeled_stable():
+    recs, _ = evaluate_recommendations(
+        [_rep("ST_do_nothing", "100"), _rep("ST_ad", "140")],
+        [_noop(), _acted("ST_ad")],
+    )
+    ad = next(r for r in recs if r.strategy_id == "ST_ad")
+    assert "stress_untested" in ad.risks
+    assert "stable_under_stress" not in ad.strengths
+    assert ad.confidence == "medium"
+
+
+def test_roas_does_not_count_for_pause():
+    pause = f.strategy().model_copy(
+        update={
+            "strategy_id": "ST_pause",
+            "actions": [PauseCampaign(action_type="pause_campaign", campaign_id="CMP_A")],
+        }
+    )
+    recs, _ = evaluate_recommendations(
+        [
+            _rep("ST_do_nothing", "10"),
+            _rep("ST_pause", "80"),
+            _rep("ST_pause", "80", scene="roas_down"),
+        ],
+        [_noop(), pause],
+    )
+    row = next(r for r in recs if r.strategy_id == "ST_pause")
+    assert "stress_untested" in row.risks
+
+
+def test_relevant_roas_can_be_stable():
+    recs, _ = evaluate_recommendations(
+        [
+            _rep("ST_do_nothing", "10"),
+            _rep("ST_ad", "80"),
+            _rep("ST_ad", "80", scene="roas_down"),
+            _rep("ST_do_nothing", "8", scene="demand_down"),
+        ],
+        [_noop(), _acted("ST_ad")],
+    )
+    ad = next(r for r in recs if r.strategy_id == "ST_ad")
+    noop = next(r for r in recs if r.strategy_id == "ST_do_nothing")
+    assert "stable_under_stress" in ad.strengths
+    assert "stress_untested" not in noop.risks
+    assert ad.confidence == "high"

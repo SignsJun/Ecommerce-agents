@@ -7,13 +7,13 @@ from agents.llm.client import LLMClient, LLMUnavailable
 from agents.simulation.catalog import catalog_kind, scenario_jobs
 from agents.simulation.compare import (
     base_reports,
-    has_stress_for,
     ranking_flipped,
     scenario_of,
 )
 from agents.simulation.context import PROMPT_VERSION, build_experiment_context, load_system_prompt
 from agents.simulation.evaluate import evaluate_recommendations, format_recommendation_set
-from agents.simulation.planner import _selected, rule_plan
+from agents.simulation.planner import rule_plan
+from agents.simulation.relevance import pending_jobs
 from agents.simulation.schema import ExperimentChoice
 from domain.decision.recommendation import StrategyRecommendation
 from domain.enums import DecisionPhase
@@ -48,6 +48,10 @@ def _flipped(reports) -> bool:
     return any(ranking_flipped(base, rows) for rows in by_scene.values())
 
 
+def _has_row(reports, sid: str, scene: str) -> bool:
+    return any(r.strategy_id == sid and scenario_of(r) == scene for r in reports)
+
+
 def _pick(
     llm: LLMClient | None,
     strategies,
@@ -57,26 +61,33 @@ def _pick(
     remaining_jobs: int,
     remaining_stress: int,
 ) -> ExperimentChoice:
-    fallback = rule_plan(reports, strategies, selected_id, done)
+    fallback = rule_plan(reports, strategies, selected_id, done, remaining_stress=remaining_stress)
+    allowed = pending_jobs(strategies, selected_id, reports, done, remaining_stress=remaining_stress)
     if llm is None:
         return fallback
     try:
         choice = llm.complete(
             load_system_prompt(),
-            build_experiment_context(strategies, reports, selected_id, remaining_jobs, remaining_stress, done),
+            build_experiment_context(
+                strategies, reports, selected_id, remaining_jobs, remaining_stress, done, allowed
+            ),
             ExperimentChoice,
         )
     except LLMUnavailable:
         return fallback
     if choice.kind == "stop":
-        return choice
-    if catalog_kind(choice.name) is None:
+        return fallback if allowed else choice
+    allowed_set = set(allowed)
+    ids = [i for i in choice.strategy_ids if (choice.name, i) in allowed_set]
+    kind = catalog_kind(choice.name)
+    if kind is None or not ids:
         return fallback
-    allowed = {s.strategy_id for s in strategies}
-    ids = [i for i in choice.strategy_ids if i in allowed]
-    if not ids:
-        return fallback
-    return ExperimentChoice(kind=choice.kind, name=choice.name, strategy_ids=ids)
+    return ExperimentChoice(kind=kind, name=choice.name, strategy_ids=ids[:1])
+
+
+def _coverage_status(strategies, selected_id, reports, done) -> str:
+    leftover = pending_jobs(strategies, selected_id, reports, done)
+    return "sufficient" if not leftover else "budget_exhausted"
 
 
 def run_experiments(
@@ -103,20 +114,26 @@ def run_experiments(
     params = SimulatorParameterSet()
     snaps = ctx.snapshot()
     sku_id = outcome.state.issue.entity_id
+    noop = next((s for s in strategies if not s.actions), None)
     skips = 0
     while True:
         if _flipped(reports):
             status = "uncertain"
             trace.append("stop\tuncertain")
             break
-        if jobs_used >= max_jobs or stress_jobs >= max_stress:
+        if jobs_used >= max_jobs:
             status = "budget_exhausted"
             trace.append("stop\tbudget")
             break
-        choice = _pick(llm, strategies, reports, selected, done, max_jobs - jobs_used, max_stress - stress_jobs)
+        remaining_stress = max_stress - stress_jobs
+        allowed = pending_jobs(strategies, selected, reports, done, remaining_stress=remaining_stress)
+        if not allowed:
+            status = _coverage_status(strategies, selected, reports, done)
+            trace.append(f"stop\t{status}")
+            break
+        choice = _pick(llm, strategies, reports, selected, done, max_jobs - jobs_used, remaining_stress)
         if choice.kind == "stop":
-            target = _selected(selected, reports)
-            status = "sufficient" if target and has_stress_for(reports, target) else "budget_exhausted"
+            status = _coverage_status(strategies, selected, reports, done)
             trace.append(f"stop\t{status}")
             break
         kind = catalog_kind(choice.name)
@@ -126,8 +143,7 @@ def run_experiments(
             skips += 1
             trace.append(f"skip\t{choice.name}")
             if skips > 4:
-                target = _selected(selected, reports)
-                status = "sufficient" if target and has_stress_for(reports, target) else "budget_exhausted"
+                status = _coverage_status(strategies, selected, reports, done)
                 break
             continue
         skips = 0
@@ -144,10 +160,13 @@ def run_experiments(
                     break
                 if kind == "stress" and stress_jobs >= max_stress:
                     break
+                batch = [strat]
+                if noop is not None and strat.strategy_id != noop.strategy_id:
+                    batch = [noop, strat]
                 rows = simulate_strategies(
                     snaps,
                     ctx.policy,
-                    [strat],
+                    batch,
                     sku_id,
                     seed=seed,
                     n=n,
@@ -157,16 +176,19 @@ def run_experiments(
                     scenario=scene,
                 )
                 for row in rows:
-                    if row.strategy_id != sid:
+                    sc = scenario_of(row)
+                    if _has_row(reports, row.strategy_id, sc):
                         continue
                     reports.append(row)
+                    if row.strategy_id != sid:
+                        continue
                     jobs_used += 1
                     if kind == "stress":
                         stress_jobs += 1
-                    trace.append(f"job\t{choice.name}\t{sid}\t{scene.scenario_id}")
+                    trace.append(f"job\t{choice.name}\t{sid}\t{sc}")
             done.add((choice.name, sid))
     if status is None:
-        status = "budget_exhausted"
+        status = _coverage_status(strategies, selected, reports, done)
     recs, rejected_eval = evaluate_recommendations(reports, strategies, status)
     state = outcome.state.model_copy(
         update={
