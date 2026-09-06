@@ -12,3 +12,4 @@ build/
 .env
 .DS_Store
 data/raw/
+data/decisions/

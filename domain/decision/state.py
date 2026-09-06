@@ -45,3 +45,4 @@ class DecisionArtifact(FrozenModel):
     evidence_ids: list[str]
     related_artifact_ids: list[str]
     document_uri: str
+    content_hash: str = ""

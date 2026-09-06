@@ -96,3 +96,39 @@ def test_cli_simulate_fake(tmp_path, capsys):
     assert "simulate" in out
     assert "profit=" in out
     assert "recommend" in out
+
+
+def test_cli_archive_fake(tmp_path, capsys):
+    data_dir = write_mini_olist(tmp_path / "olist")
+    mem = tmp_path / "decisions"
+    code = main(["archive", "--data-dir", str(data_dir), "--fake-llm", "--n", "2", "--decisions-dir", str(mem)])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "decision=" in out
+    assert "recommend" in out
+    line = next(x for x in out.splitlines() if x.startswith("decision="))
+    did = line.split("\t")[0].split("=", 1)[1]
+    folder = mem / did
+    for name in (
+        "01_issue_brief.md",
+        "02_diagnosis_report.md",
+        "03_strategy_proposals.md",
+        "04_simulation_report.md",
+        "05_decision_record.md",
+        "case.json",
+        "provenance.json",
+    ):
+        assert (folder / name).exists()
+    code = main(["cases", "--decisions-dir", str(mem)])
+    assert code == 0
+    listed = capsys.readouterr().out
+    assert did in listed
+    code = main(["case", did, "--decisions-dir", str(mem)])
+    assert code == 0
+    body = capsys.readouterr().out
+    assert "document_type: decision_record" in body
+    code = main(["trace", did, "--decisions-dir", str(mem)])
+    assert code == 0
+    trace = capsys.readouterr().out
+    assert "edge\t" in trace
+    assert "node\t" in trace

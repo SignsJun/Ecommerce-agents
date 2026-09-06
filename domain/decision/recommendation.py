@@ -18,3 +18,4 @@ class StrategyRecommendation(FrozenModel):
     strengths: list[str] = []
     risks: list[str] = []
     suitable_when: list[str] = []
+    simulation_support: list[str] = []
