@@ -1,5 +1,7 @@
 # E-commerce Operations Decision Agent
 
+[English](README.md) | [中文](README_CN.md)
+
 A decision pipeline for shop operations: screen issues by impact, investigate with evidence, simulate candidate plans under stress, then recommend a plan that is structured and traceable.
 
 ![Decision pipeline from diagnosis to plan selection](figures/project_framework_final.png)
