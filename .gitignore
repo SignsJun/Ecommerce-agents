@@ -17,3 +17,7 @@ data/runs/
 data/raw/uploads/
 web/node_modules/
 web/dist/
+.figure-build/
+figures/*
+!figures/project_framework_final.png
+plans/
